@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scrollbar-gutter: stable;
+  }
+  body {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  ::selection {
+    background: rgba(124, 156, 255, 0.32);
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #252b39;
+    border-radius: 6px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3d4a7a;
+  }
+}
+
+@layer components {
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
+  }
+  .chip-easy {
+    @apply bg-easy/15 text-easy ring-1 ring-easy/30;
+  }
+  .chip-medium {
+    @apply bg-medium/15 text-medium ring-1 ring-medium/30;
+  }
+  .chip-hard {
+    @apply bg-hard/15 text-hard ring-1 ring-hard/30;
+  }
+  .chip-tag {
+    @apply bg-bg-border/60 text-ink-mute ring-1 ring-bg-border;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition;
+  }
+  .btn-primary {
+    @apply btn bg-accent/15 text-accent ring-1 ring-accent/30 hover:bg-accent/25;
+  }
+  .btn-ghost {
+    @apply btn text-ink-mute hover:bg-bg-soft hover:text-ink;
+  }
+  .card {
+    @apply rounded-xl border border-bg-border bg-bg-card;
+  }
+  .input {
+    @apply w-full rounded-md border border-bg-border bg-bg-soft px-3 py-2 text-sm text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30;
+  }
+  .link {
+    @apply text-accent hover:text-accent-hover hover:underline underline-offset-2;
+  }
+  .kbd {
+    @apply inline-flex items-center rounded border border-bg-border bg-bg-soft px-1.5 py-0.5 font-mono text-[11px] text-ink-mute;
+  }
+
+  /* prose 暗色微调 */
+  .prose-dark {
+    @apply prose prose-invert max-w-none
+      prose-headings:font-semibold prose-headings:tracking-tight
+      prose-h1:text-3xl prose-h2:text-2xl prose-h3:text-xl
+      prose-h2:mt-10 prose-h2:border-b prose-h2:border-bg-border prose-h2:pb-2
+      prose-a:text-accent prose-a:no-underline hover:prose-a:underline
+      prose-code:text-accent prose-code:before:content-none prose-code:after:content-none
+      prose-code:rounded prose-code:bg-bg-soft prose-code:px-1.5 prose-code:py-0.5
+      prose-pre:!bg-bg-soft prose-pre:border prose-pre:border-bg-border prose-pre:rounded-lg
+      prose-blockquote:border-l-accent prose-blockquote:bg-bg-soft/40 prose-blockquote:py-1 prose-blockquote:px-4
+      prose-blockquote:not-italic prose-blockquote:text-ink-mute
+      prose-table:text-sm
+      prose-strong:text-ink prose-li:marker:text-ink-dim;
+  }
+
+  /* mermaid 容器深色背景 */
+  .mermaid-container {
+    @apply my-6 flex items-center justify-center overflow-x-auto rounded-lg border border-bg-border bg-bg-soft p-5;
+    min-height: 17rem;
+  }
+  .mermaid-container svg {
+    width: min(100%, 820px) !important;
+    min-width: 620px;
+    min-height: 230px;
+    max-height: 380px;
+  }
+}
