@@ -13,8 +13,45 @@
   async function update(src: string) {
     html = await renderMarkdown(src);
     await tick();
+    linkProblemReferences();
     await renderMermaid();
     renderMath();
+  }
+
+  function linkProblemReferences() {
+    if (!container) return;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || !/#\d{1,5}/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+        const p = node.parentElement;
+        if (!p) return NodeFilter.FILTER_REJECT;
+        if (['A', 'CODE', 'PRE', 'SCRIPT', 'STYLE'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    const nodes: Text[] = [];
+    let n: Node | null;
+    while ((n = walker.nextNode())) nodes.push(n as Text);
+
+    for (const node of nodes) {
+      const text = node.nodeValue ?? '';
+      const frag = document.createDocumentFragment();
+      let lastIndex = 0;
+      const re = /#(\d{1,5})(?=$|[\s,，、.。:：)）])/g;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(text)) !== null) {
+        frag.append(document.createTextNode(text.slice(lastIndex, match.index)));
+        const a = document.createElement('a');
+        a.href = `/problems/${match[1]}`;
+        a.textContent = match[0];
+        a.className = 'problem-ref';
+        frag.append(a);
+        lastIndex = match.index + match[0].length;
+      }
+      frag.append(document.createTextNode(text.slice(lastIndex)));
+      node.parentNode?.replaceChild(frag, node);
+    }
   }
 
   async function renderMermaid() {
@@ -128,5 +165,21 @@
   :global(.mermaid-container svg) {
     max-width: 100%;
     height: auto;
+  }
+  :global(.problem-ref) {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #252b39;
+    border-radius: 0.375rem;
+    background: #161a23;
+    padding: 0 0.35rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9em;
+    color: #7c9cff !important;
+    text-decoration: none !important;
+  }
+  :global(.problem-ref:hover) {
+    border-color: rgba(124, 156, 255, 0.5);
+    background: rgba(124, 156, 255, 0.12);
   }
 </style>

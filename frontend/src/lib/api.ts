@@ -53,6 +53,7 @@ export interface ArticleListItem {
   slug: string;
   title: string;
   category: string;
+  difficulty: Difficulty;
   summary: string;
   problem_ids: number[];
   order_in_cat: number;

@@ -1,11 +1,16 @@
 <script lang="ts">
-  import { Search, ArrowRight, BookOpen, ListChecks, Layers, Zap } from 'lucide-svelte';
+  import { Search, ArrowRight, BookOpen, ListChecks, Layers, Route, Zap } from 'lucide-svelte';
 
   export let data;
   $: stats = data.stats;
   $: articles = data.articles;
 
   const features = [
+    {
+      icon: Route,
+      title: '训练路线',
+      desc: '按“读懂、独立做、复盘”推进，把零散题解串成阶段目标。'
+    },
     {
       icon: ListChecks,
       title: '完整题库浏览',
@@ -46,8 +51,8 @@
       把算法<span class="text-accent">啃</span>下来
     </h1>
     <p class="mx-auto mt-4 max-w-2xl text-balance text-ink-mute">
-      不是另一个抄袭站。这里只有题目索引、站内讲解和手写练习区。
-      先自己写，再按需展开题解对照思路和代码。
+      不是另一个题目索引。这里把题解、题库和训练路线串起来：
+      先读懂模式，再独立写题，最后复盘可迁移的算法思维。
     </p>
 
     <div class="mx-auto mt-8 flex max-w-xl items-center gap-2">
@@ -63,6 +68,11 @@
       <button class="btn-primary" on:click={goSearch}>
         搜索 <ArrowRight size={14} />
       </button>
+    </div>
+    <div class="mt-4">
+      <a href="/training" class="btn-ghost">
+        进入训练路线 <ArrowRight size={14} />
+      </a>
     </div>
   </section>
 

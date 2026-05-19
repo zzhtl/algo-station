@@ -5,6 +5,7 @@
     ListChecks,
     BookOpen,
     Tags,
+    Route,
     Sparkles
   } from 'lucide-svelte';
 
@@ -12,6 +13,7 @@
 
   const nav: NavItem[] = [
     { href: '/', label: '首页', icon: Home, exact: true },
+    { href: '/training', label: '训练路线', icon: Route },
     { href: '/problems', label: '题库浏览', icon: ListChecks },
     { href: '/articles', label: '原创题解', icon: BookOpen },
     { href: '/tags', label: '算法分类', icon: Tags }
