@@ -49,6 +49,20 @@ export interface StatementResponse {
   license: string;
 }
 
+export interface SolutionCode {
+  lang: string;
+  label: string;
+  code: string;
+}
+
+export interface SolutionsResponse {
+  problem_id: number;
+  solutions: SolutionCode[];
+  source: string;
+  source_url: string;
+  license: string;
+}
+
 export interface ArticleListItem {
   slug: string;
   title: string;
@@ -79,6 +93,50 @@ export interface Stats {
   total_articles: number;
 }
 
+export interface ApiTrainingRecord {
+  article_slug: string;
+  status: string;
+  pattern_note: string;
+  completed_problems: number[];
+  attempt_result: string;
+  stuck_note: string;
+  review_note: string;
+  updated_at?: string;
+}
+
+export type TrainingInput = Omit<ApiTrainingRecord, 'article_slug' | 'updated_at'>;
+
+export interface Draft {
+  problem_id: number;
+  lang: string;
+  code: string;
+  updated_at?: string;
+}
+
+export interface CategoryProgress {
+  category: string;
+  total_articles: number;
+  learned: number;
+  practiced: number;
+  reviewed: number;
+}
+
+export interface ProgressStats {
+  categories: CategoryProgress[];
+  total_articles: number;
+  learned: number;
+  practiced: number;
+  reviewed: number;
+  todo: number;
+}
+
+export interface ProgressExport {
+  training: ApiTrainingRecord[];
+  drafts: Draft[];
+  bookmarks: number[];
+  exported_at?: string;
+}
+
 const BASE = '/api';
 
 async function get<T>(fetchFn: typeof fetch, path: string): Promise<T> {
@@ -87,6 +145,22 @@ async function get<T>(fetchFn: typeof fetch, path: string): Promise<T> {
     throw new Error(`API ${res.status}: ${path}`);
   }
   return res.json() as Promise<T>;
+}
+
+async function send<T>(
+  fetchFn: typeof fetch,
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const res = await fetchFn(`${BASE}${path}`, {
+    method,
+    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
@@ -104,6 +178,26 @@ export const api = {
   problem: (id: number | string, f = fetch) => get<ProblemDetail>(f, `/problems/${id}`),
   statement: (id: number | string, lang: StatementLang = 'cn', f = fetch) =>
     get<StatementResponse>(f, `/problems/${id}/statement?lang=${lang}`),
+  solutions: (id: number | string, lang?: string, f = fetch) =>
+    get<SolutionsResponse>(
+      f,
+      `/problems/${id}/solutions${lang ? '?lang=' + encodeURIComponent(lang) : ''}`
+    ),
   articles: (f = fetch) => get<ArticleListItem[]>(f, '/articles'),
-  article: (slug: string, f = fetch) => get<ArticleFull>(f, `/articles/${slug}`)
+  article: (slug: string, f = fetch) => get<ArticleFull>(f, `/articles/${slug}`),
+
+  // 进度 / 草稿 / 收藏（后端持久化，跨浏览器不丢）
+  trainingRecords: (f = fetch) => get<ApiTrainingRecord[]>(f, '/progress/training'),
+  putTraining: (slug: string, body: TrainingInput, f = fetch) =>
+    send<ApiTrainingRecord>(f, 'PUT', `/progress/training/${encodeURIComponent(slug)}`, body),
+  drafts: (id: number | string, f = fetch) => get<Draft[]>(f, `/progress/drafts/${id}`),
+  putDraft: (id: number | string, lang: string, code: string, f = fetch) =>
+    send<Draft>(f, 'PUT', `/progress/drafts/${id}/${lang}`, { code }),
+  bookmarks: (f = fetch) => get<number[]>(f, '/bookmarks'),
+  addBookmark: (id: number | string, f = fetch) => send<void>(f, 'PUT', `/bookmarks/${id}`),
+  removeBookmark: (id: number | string, f = fetch) => send<void>(f, 'DELETE', `/bookmarks/${id}`),
+  progressStats: (f = fetch) => get<ProgressStats>(f, '/stats/progress'),
+  exportProgress: (f = fetch) => get<ProgressExport>(f, '/progress/export'),
+  importProgress: (body: ProgressExport, f = fetch) =>
+    send<{ training: number; drafts: number; bookmarks: number }>(f, 'POST', '/progress/import', body)
 };

@@ -33,13 +33,14 @@ pub async fn list(
         }
     }
 
+    // 多标签按 AND：每个 slug 一个子句，命中"同时具备这些标签"的题。
     if let Some(tag) = q.tag.as_deref() {
-        if !tag.is_empty() {
+        for slug in tag.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             where_clauses.push(
                 "p.id IN (SELECT pt.problem_id FROM problem_tags pt JOIN tags t ON t.id = pt.tag_id WHERE t.slug = ?)"
                     .into(),
             );
-            binds.push(tag.to_string());
+            binds.push(slug.to_string());
         }
     }
 
@@ -51,12 +52,23 @@ pub async fn list(
                 binds.push(num.to_string());
                 binds.push(format!("%{}%", needle));
                 binds.push(format!("%{}%", needle));
-            } else {
+            } else if needle.chars().count() >= 3 {
+                // trigram 全文索引：覆盖题名/slug/标签文本，子串匹配。
                 where_clauses
-                    .push("(p.title_en LIKE ? OR p.title_cn LIKE ? OR p.slug LIKE ?)".into());
-                binds.push(format!("%{}%", needle));
-                binds.push(format!("%{}%", needle));
-                binds.push(format!("%{}%", needle));
+                    .push("p.id IN (SELECT id FROM problems_fts WHERE problems_fts MATCH ?)".into());
+                binds.push(fts_phrase(needle));
+            } else {
+                // 1-2 字符 trigram 无法成词，回退 LIKE，并额外覆盖标签名。
+                where_clauses.push(
+                    "(p.title_en LIKE ? OR p.title_cn LIKE ? OR p.slug LIKE ?
+                      OR p.id IN (SELECT pt.problem_id FROM problem_tags pt JOIN tags t ON t.id = pt.tag_id
+                                  WHERE t.name_cn LIKE ? OR t.name_en LIKE ? OR t.slug LIKE ?))"
+                        .into(),
+                );
+                let like = format!("%{}%", needle);
+                for _ in 0..6 {
+                    binds.push(like.clone());
+                }
             }
         }
     }
@@ -66,6 +78,10 @@ pub async fn list(
             "EXISTS (SELECT 1 FROM articles a, json_each(a.problem_ids) je WHERE CAST(je.value AS INTEGER) = p.id)"
                 .into(),
         );
+    }
+
+    if q.bookmarked == Some(true) {
+        where_clauses.push("p.id IN (SELECT problem_id FROM bookmarks)".into());
     }
 
     let where_sql = if where_clauses.is_empty() {
@@ -273,6 +289,122 @@ pub async fn statement(
         source_url: format!("https://github.com/doocs/leetcode/tree/main/{}", repo_dir),
         license: "CC-BY-SA-4.0".into(),
     }))
+}
+
+/// 把用户输入包成 FTS5 双引号短语并转义内部引号，避免 MATCH 语法被特殊字符破坏；
+/// trigram 分词器下，双引号短语即按子串匹配。
+fn fts_phrase(needle: &str) -> String {
+    format!("\"{}\"", needle.replace('"', "\"\""))
+}
+
+#[derive(Deserialize)]
+pub struct SolutionsQuery {
+    /// 逗号分隔的语言过滤（如 "go,rust"），缺省返回全部。
+    pub lang: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SolutionCode {
+    /// 代码围栏语言，如 go/rust/python/cpp。
+    pub lang: String,
+    /// 所属方法标题（如 "方法一：哈希表"），可能为空。
+    pub label: String,
+    pub code: String,
+}
+
+#[derive(Serialize)]
+pub struct SolutionsResponse {
+    pub problem_id: i64,
+    pub solutions: Vec<SolutionCode>,
+    pub source: String,
+    pub source_url: String,
+    pub license: String,
+}
+
+/// 兑现 README 早已声明但未实现的 `/solutions`：从 doocs README 的「## 解法」段
+/// 抽取各语言参考代码（`#### Go` / ```` ```go ```` 形式），供前端按语言展示并填入编辑器。
+pub async fn solutions(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(q): Query<SolutionsQuery>,
+) -> ApiResult<Json<SolutionsResponse>> {
+    let repo_dir: Option<String> =
+        sqlx::query_scalar("SELECT repo_dir FROM problems WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let repo_dir = repo_dir.ok_or(ApiError::NotFound)?;
+    if repo_dir.is_empty() {
+        return Err(ApiError::NotFound);
+    }
+
+    // 优先中文 README，回退英文。
+    let content = problem_seed::read_statement(&state.leetcode_repo, &repo_dir, Lang::Cn)
+        .or_else(|_| problem_seed::read_statement(&state.leetcode_repo, &repo_dir, Lang::En))
+        .map_err(|_| ApiError::NotFound)?;
+
+    let mut solutions = extract_solutions(&content);
+
+    if let Some(filter) = q.lang.as_deref() {
+        let allow: Vec<String> = filter
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !allow.is_empty() {
+            solutions.retain(|s| allow.iter().any(|a| &s.lang == a));
+        }
+    }
+
+    Ok(Json(SolutionsResponse {
+        problem_id: id,
+        solutions,
+        source: "doocs/leetcode".into(),
+        source_url: format!("https://github.com/doocs/leetcode/tree/main/{}", repo_dir),
+        license: "CC-BY-SA-4.0".into(),
+    }))
+}
+
+/// 从题面正文的「## 解法」段抽取所有带语言的 fenced code block。
+/// `### 方法X` 作为 label，`#### 语言` 与围栏语言提供语言名。
+fn extract_solutions(markdown: &str) -> Vec<SolutionCode> {
+    let start = markdown
+        .find("\n## 解法")
+        .or_else(|| markdown.find("\n## Solution"))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let section = &markdown[start..];
+
+    let mut out = Vec::new();
+    let mut label = String::new();
+    let mut lines = section.lines();
+    while let Some(line) = lines.next() {
+        let t = line.trim_start();
+        // 方法标题（三级）作为分组 label；语言标题（四级）忽略，靠围栏语言识别。
+        if let Some(h) = t.strip_prefix("### ") {
+            label = h.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("```") {
+            let lang = rest.trim().to_ascii_lowercase();
+            let mut code = String::new();
+            for l in lines.by_ref() {
+                if l.trim_start().starts_with("```") {
+                    break;
+                }
+                code.push_str(l);
+                code.push('\n');
+            }
+            if !lang.is_empty() && !code.trim().is_empty() {
+                out.push(SolutionCode {
+                    lang,
+                    label: label.clone(),
+                    code: code.trim_end().to_string(),
+                });
+            }
+        }
+    }
+    out
 }
 
 fn normalize_difficulty(s: &str) -> String {

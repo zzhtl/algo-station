@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ErrorState from '$lib/components/ErrorState.svelte';
   export let data;
   $: tags = data.tags;
 </script>
@@ -11,6 +12,9 @@
     </p>
   </div>
 
+  {#if data.loadError}
+    <ErrorState />
+  {:else}
   <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
     {#each tags as t}
       <a href="/problems?tag={t.slug}" class="card flex items-center justify-between p-3 transition hover:border-accent/40">
@@ -22,4 +26,5 @@
       </a>
     {/each}
   </div>
+  {/if}
 </div>

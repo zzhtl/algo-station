@@ -2,6 +2,7 @@
   import { BookOpen } from 'lucide-svelte';
   import type { ArticleListItem, Difficulty } from '$lib/api';
   import DifficultyChip from '$lib/components/DifficultyChip.svelte';
+  import ErrorState from '$lib/components/ErrorState.svelte';
 
   export let data;
   $: articles = data.articles;
@@ -42,7 +43,9 @@
     </p>
   </div>
 
-  {#if articles.length === 0}
+  {#if data.loadError}
+    <ErrorState />
+  {:else if articles.length === 0}
     <div class="card p-10 text-center text-sm text-ink-mute">
       <BookOpen size={24} class="mx-auto mb-2 text-ink-dim" />
       还没有题解。运行 <code class="kbd">cargo run --bin import</code> 后请等等我补内容。

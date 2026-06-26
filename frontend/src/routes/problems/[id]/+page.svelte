@@ -1,7 +1,10 @@
 <script lang="ts">
   import DifficultyChip from '$lib/components/DifficultyChip.svelte';
   import MarkdownView from '$lib/components/MarkdownView.svelte';
-  import { ArrowLeft, BookOpen, Lock, FileText, Eye, EyeOff, Code2, RotateCcw } from 'lucide-svelte';
+  import CodeEditor from '$lib/components/CodeEditor.svelte';
+  import BookmarkButton from '$lib/components/BookmarkButton.svelte';
+  import { api, type SolutionCode } from '$lib/api';
+  import { ArrowLeft, BookOpen, Lock, FileText, Eye, EyeOff, Code2, RotateCcw, Copy, Check } from 'lucide-svelte';
 
   export let data;
   $: p = data.problem;
@@ -14,16 +17,49 @@
   let showSolution = false;
   let problemMarkdown = '';
   let solutionMarkdown = '';
-  let practiceLang = 'go';
+  let practiceLang: 'go' | 'rust' | 'python' = 'go';
   let practiceCode = '';
   let loadedPracticeKey = '';
+
+  // 参考解法（go/rust/python，来自 doocs README 抽取）
+  $: solutions = (data.solutions ?? []) as SolutionCode[];
+  $: refLangs = [...new Set(solutions.map((s) => s.lang))];
+  let refLang = '';
+  $: if (refLangs.length && !refLangs.includes(refLang)) refLang = refLangs[0];
+  $: refItems = solutions.filter((s) => s.lang === refLang);
+  let showRef = false;
+  let copiedCode = '';
+
+  const LANG_LABEL: Record<string, string> = { go: 'Go', rust: 'Rust', python: 'Python' };
+  const langLabel = (l: string) => LANG_LABEL[l] ?? l;
+
+  function copyCode(code: string) {
+    navigator.clipboard?.writeText(code).then(() => {
+      copiedCode = code;
+      setTimeout(() => {
+        if (copiedCode === code) copiedCode = '';
+      }, 1500);
+    });
+  }
+
+  function fillEditor(item: SolutionCode) {
+    practiceLang = item.lang as 'go' | 'rust' | 'python';
+    practiceCode = item.code;
+    loadedPracticeKey = `algo-station:practice:${p.id}:${item.lang}`;
+    savePractice();
+  }
 
   $: {
     if (stmtLang === 'cn' && !hasCn && hasEn) stmtLang = 'en';
     if (stmtLang === 'en' && !hasEn && hasCn) stmtLang = 'cn';
   }
   $: ({ problemMarkdown, solutionMarkdown } = splitStatement(stmtLang === 'cn' ? stmtCn : stmtEn));
-  $: loadPractice(p.id, practiceLang);
+  // 后端草稿（按语言）。切题/切语言时优先用后端草稿，localStorage 仅离线兜底。
+  $: draftMap = Object.fromEntries((data.drafts ?? []).map((d) => [d.lang, d.code])) as Record<
+    string,
+    string
+  >;
+  $: loadPractice(p.id, practiceLang, draftMap);
 
   function splitStatement(source: string) {
     const match = /\n##\s+(解法|Solution)(?=\s|$)/.exec(source);
@@ -34,10 +70,15 @@
     };
   }
 
-  function loadPractice(problemId: number, lang: string) {
+  function loadPractice(problemId: number, lang: string, drafts: Record<string, string>) {
     const key = `algo-station:practice:${problemId}:${lang}`;
     if (key === loadedPracticeKey) return;
     loadedPracticeKey = key;
+    const fromBackend = drafts[lang];
+    if (fromBackend != null && fromBackend !== '') {
+      practiceCode = fromBackend;
+      return;
+    }
     if (typeof localStorage === 'undefined') {
       practiceCode = defaultPracticeCode(lang);
       return;
@@ -45,9 +86,19 @@
     practiceCode = localStorage.getItem(key) ?? defaultPracticeCode(lang);
   }
 
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
   function savePractice() {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(loadedPracticeKey, practiceCode);
+    if (typeof localStorage !== 'undefined' && loadedPracticeKey) {
+      localStorage.setItem(loadedPracticeKey, practiceCode);
+    }
+    // 防抖写后端（同机跨浏览器不丢），失败静默回退到本地缓存。
+    clearTimeout(saveTimer);
+    const id = p.id;
+    const lang = practiceLang;
+    const code = practiceCode;
+    saveTimer = setTimeout(() => {
+      api.putDraft(id, lang, code).catch(() => {});
+    }, 800);
   }
 
   function resetPractice() {
@@ -87,6 +138,7 @@
         <h1 class="mt-2 text-2xl font-bold text-ink">{p.title_cn}</h1>
         <div class="mt-1 text-sm text-ink-mute">{p.title_en}</div>
       </div>
+      <BookmarkButton id={p.id} size={20} />
     </div>
 
     {#if p.tags.length > 0}
@@ -154,6 +206,11 @@
         <Code2 size={16} /> 练习代码
       </h2>
       <div class="flex items-center gap-2">
+        {#if refLangs.length}
+          <button class="btn-ghost text-xs" on:click={() => (showRef = !showRef)}>
+            <BookOpen size={13} /> {showRef ? '隐藏参考' : '参考解法'}
+          </button>
+        {/if}
         <select class="input !w-auto py-1 text-xs" bind:value={practiceLang}>
           <option value="go">Go</option>
           <option value="rust">Rust</option>
@@ -164,13 +221,49 @@
         </button>
       </div>
     </div>
-    <textarea
-      class="min-h-[22rem] w-full resize-y rounded-lg border border-bg-border bg-[#0b0d12] p-4 font-mono text-sm leading-6 text-ink outline-none transition placeholder:text-ink-dim focus:border-accent focus:ring-2 focus:ring-accent/30"
+
+    <CodeEditor
       bind:value={practiceCode}
-      on:input={savePractice}
-      spellcheck="false"
+      lang={practiceLang}
+      on:change={savePractice}
       placeholder="在这里手写解法，切换题目或语言会自动保存。"
-    ></textarea>
+    />
+
+    {#if showRef && refLangs.length}
+      <div class="card mt-3 p-4">
+        <div class="mb-3 flex items-center justify-between gap-2">
+          <div class="flex overflow-hidden rounded-md border border-bg-border text-xs">
+            {#each refLangs as l}
+              <button
+                class="px-3 py-1 transition {refLang === l
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-ink-mute hover:text-ink'}"
+                on:click={() => (refLang = l)}>{langLabel(l)}</button
+              >
+            {/each}
+          </div>
+          <span class="text-xs text-ink-dim">来自 doocs/leetcode · CC-BY-SA-4.0</span>
+        </div>
+        {#each refItems as item}
+          <div class="mb-3 last:mb-0">
+            {#if item.label}
+              <div class="mb-1.5 text-xs text-ink-mute">{item.label}</div>
+            {/if}
+            <div class="relative">
+              <div class="absolute right-2 top-2 z-10 flex gap-1">
+                <button class="btn-ghost !px-2 !py-1 text-xs" on:click={() => copyCode(item.code)}>
+                  {#if copiedCode === item.code}<Check size={12} /> 已复制{:else}<Copy size={12} /> 复制{/if}
+                </button>
+                <button class="btn-primary !px-2 !py-1 text-xs" on:click={() => fillEditor(item)}>
+                  填入编辑器
+                </button>
+              </div>
+              <pre class="overflow-x-auto rounded-md border border-bg-border bg-bg-soft p-3 pt-11 font-mono text-xs leading-6 text-ink"><code>{item.code}</code></pre>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </section>
 
   <section class="mt-6">

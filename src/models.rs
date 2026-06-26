@@ -70,10 +70,13 @@ pub struct ArticleFull {
 pub struct ListQuery {
     pub q: Option<String>,
     pub difficulty: Option<String>,
+    /// 单个或逗号分隔的多个 tag slug，多标签按 AND（同时具备）。
     pub tag: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,
     pub has_article: Option<bool>,
+    /// 仅返回已收藏的题目。
+    pub bookmarked: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

@@ -2,6 +2,8 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import DifficultyChip from '$lib/components/DifficultyChip.svelte';
+  import ErrorState from '$lib/components/ErrorState.svelte';
+  import BookmarkButton from '$lib/components/BookmarkButton.svelte';
   import { Search, FileText, Lock, ChevronLeft, ChevronRight, X } from 'lucide-svelte';
 
   export let data;
@@ -106,6 +108,9 @@
     </div>
   {/if}
 
+  {#if data.loadError}
+    <ErrorState />
+  {:else}
   <div class="card overflow-hidden">
     <table class="w-full text-sm">
       <thead class="border-b border-bg-border bg-bg-soft/60 text-left text-xs text-ink-mute">
@@ -153,7 +158,8 @@
               {p.acceptance_rate != null ? `${p.acceptance_rate.toFixed(1)}%` : '—'}
             </td>
             <td class="px-4 py-3 align-top">
-              <div class="flex justify-end gap-1">
+              <div class="flex items-center justify-end gap-1">
+                <BookmarkButton id={p.id} size={15} />
                 <a href="/problems/{p.id}" class="btn-ghost !px-2" title="详情">
                   <FileText size={14} />
                 </a>
@@ -189,5 +195,6 @@
         </button>
       </div>
     </div>
+  {/if}
   {/if}
 </div>

@@ -5,24 +5,26 @@ export default {
   theme: {
     extend: {
       colors: {
+        // 调色板由 app.css 的 CSS 变量驱动（:root 亮色 / .dark 暗色），
+        // 模板里的 bg-bg-card / text-ink 等类名无需改动即可随主题切换。
         bg: {
-          DEFAULT: '#0b0d12',
-          soft: '#11141b',
-          card: '#161a23',
-          border: '#252b39'
+          DEFAULT: 'rgb(var(--c-bg) / <alpha-value>)',
+          soft: 'rgb(var(--c-bg-soft) / <alpha-value>)',
+          card: 'rgb(var(--c-bg-card) / <alpha-value>)',
+          border: 'rgb(var(--c-bg-border) / <alpha-value>)'
         },
         accent: {
-          DEFAULT: '#7c9cff',
-          hover: '#94aeff',
-          muted: '#3d4a7a'
+          DEFAULT: 'rgb(var(--c-accent) / <alpha-value>)',
+          hover: 'rgb(var(--c-accent-hover) / <alpha-value>)',
+          muted: 'rgb(var(--c-accent-muted) / <alpha-value>)'
         },
-        easy: '#22c55e',
-        medium: '#f59e0b',
-        hard: '#ef4444',
+        easy: 'rgb(var(--c-easy) / <alpha-value>)',
+        medium: 'rgb(var(--c-medium) / <alpha-value>)',
+        hard: 'rgb(var(--c-hard) / <alpha-value>)',
         ink: {
-          DEFAULT: '#e6e8ee',
-          mute: '#a0a6b3',
-          dim: '#6b7280'
+          DEFAULT: 'rgb(var(--c-ink) / <alpha-value>)',
+          mute: 'rgb(var(--c-ink-mute) / <alpha-value>)',
+          dim: 'rgb(var(--c-ink-dim) / <alpha-value>)'
         }
       },
       fontFamily: {

@@ -7,7 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "content" / "articles"
-TARGET_NEW_ARTICLES = 182
+# 13 个基础专题各 14 个 pattern = 182；末尾新增 3 个进阶专题各 12 个 = 36，合计 218。
+# 进阶专题追加在列表末尾，不影响前 182 篇的 global_index，避免既有文件产生无谓 diff。
+TARGET_NEW_ARTICLES = 218
 
 
 @dataclass(frozen=True)
@@ -320,22 +322,89 @@ CATEGORIES: list[Category] = [
             "快照数组版本列表",
         ],
     ),
+    Category(
+        "区间查询",
+        "range-query",
+        "频繁单点更新又要区间聚合时，用树状数组或线段树把每次操作压到对数级。",
+        "nums []int",
+        [307, 308, 315, 327, 493, 218, 699, 715, 732, 850, 1094, 2406],
+        [
+            "树状数组单点更新区间和",
+            "权值树状数组求第 K 小",
+            "离散化后统计逆序对",
+            "线段树区间求和",
+            "线段树区间最值查询",
+            "懒标记实现区间加",
+            "扫描线统计区间覆盖",
+            "二维树状数组矩形和",
+            "动态开点线段树",
+            "前缀和与差分预处理",
+            "线段树合并最大子段和",
+            "树状数组维护前缀计数",
+        ],
+    ),
+    Category(
+        "字符串匹配",
+        "string-matching",
+        "失配时利用已经匹配的前缀，避免从头重来，把匹配从 O(nm) 降到线性。",
+        "s string",
+        [28, 459, 214, 5, 647, 686, 796, 1392, 187, 1044, 3008, 1316],
+        [
+            "KMP 前缀函数匹配",
+            "构造 next 数组",
+            "Z 函数求每位扩展",
+            "Manacher 求最长回文",
+            "字符串哈希 O(1) 比较",
+            "双哈希防碰撞",
+            "最小循环节判断",
+            "求字符串所有 border",
+            "Rabin-Karp 滚动哈希",
+            "字典树多模式匹配",
+            "后缀排序比较",
+            "中心扩展判回文",
+        ],
+    ),
+    Category(
+        "进阶动态规划",
+        "advanced-dp",
+        "线性状态不够用时升维：按数位、按子集 bitmask、按区间 [l, r] 编码状态。",
+        "nums []int",
+        [233, 600, 902, 1012, 526, 847, 1349, 312, 1000, 664, 1411, 879],
+        [
+            "数位 DP 按位填充",
+            "数位 DP 记忆化搜索",
+            "状压 DP 枚举子集",
+            "状压 DP 旅行商",
+            "区间 DP 枚举断点",
+            "区间 DP 合并代价",
+            "树形 DP 换根",
+            "概率期望 DP 倒推",
+            "单调队列优化转移",
+            "矩阵快速幂加速递推",
+            "博弈 DP 先手必胜",
+            "计数 DP 去重",
+        ],
+    ),
 ]
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    written = 0
+    scanned = 0
+    created = 0
     for cat in CATEGORIES:
         for index, pattern in enumerate(cat.patterns, start=1):
-            if written >= TARGET_NEW_ARTICLES:
-                return
+            if scanned >= TARGET_NEW_ARTICLES:
+                break
             slug = f"{cat.slug}-{index:02d}-{slugify(pattern)}"
             path = OUT / f"{slug}.md"
-            path.write_text(render_article(cat, pattern, index, written), encoding="utf-8")
-            written += 1
-    if written != TARGET_NEW_ARTICLES:
-        raise SystemExit(f"expected {TARGET_NEW_ARTICLES}, wrote {written}")
+            # 重要：已存在的文章可能已被手工精修，跳过以免覆盖。
+            # 生成器只负责为"新增的专题/模式"产出脚手架，绝不回写既有文件。
+            if not path.exists():
+                path.write_text(render_article(cat, pattern, index, scanned), encoding="utf-8")
+                created += 1
+            scanned += 1
+    print(f"扫描 {scanned} 个脚手架位点，新建 {created} 个文件（已存在的均跳过、不覆盖）")
 
 
 def render_article(cat: Category, pattern: str, index: int, global_index: int) -> str:
@@ -424,6 +493,9 @@ def visual_for(cat: Category, pattern: str) -> dict[str, str]:
         "backtracking": backtracking_visual,
         "math-bit": math_visual,
         "design-structure": design_visual,
+        "range-query": range_query_visual,
+        "string-matching": string_matching_visual,
+        "advanced-dp": advanced_dp_visual,
     }
     return by_slug.get(cat.slug, array_visual)(pattern)
 
@@ -696,6 +768,62 @@ def design_visual(pattern: str) -> dict[str, str]:
         "设计题不是把高级结构堆上去，而是让每个操作都能用不变量解释为什么正确。",
         "- 时间复杂度：取决于 API 目标，常见为 $O(1)$ 或 $O(\\log n)$。\n- 空间复杂度：通常要额外保存索引。",
         "- 删除时只删主结构，忘了删索引。\n- 随机集合删除没有更新被交换元素的位置。\n- LRU 更新访问顺序时漏掉移动节点。",
+    )
+
+
+def range_query_visual(pattern: str) -> dict[str, str]:
+    return base_visual(
+        pattern,
+        f"""flowchart LR
+  U[单点/区间更新] --> T[树状数组 / 线段树]
+  Q[前缀或区间查询] --> T
+  T --> C{{"{pattern}: O(log n) 维护"}}
+  C --> A[合并子区间答案]
+  A --> O[返回区间结果]""",
+        "- 出现“频繁单点更新 + 区间查询（和 / 最值 / 计数）”，朴素前缀和每次更新退化成 $O(n)$，改用树状数组或线段树。\n- 先确定维护的是和、最值还是计数，再决定结构与是否需要懒标记。",
+        "- `tree`：每个节点维护一段区间的聚合值。\n- `lowbit / 区间端点`：决定更新和查询要跳过哪些区间。\n- `lazy`：区间更新时挂起、查询时下传的标记。",
+        "1. 想清楚维护的聚合是和 / 最值 / 计数。\n2. 树状数组写 update 与 query，循环按 `i += i & -i` / `i -= i & -i` 跳。\n3. 需要区间更新就上线段树 + 懒标记，pushdown 再递归。\n4. 值域大时先离散化再建树。",
+        "树状数组和线段树把“前缀聚合 + 单点修改”都压到 $O(\\log n)$，逆序对、区间和、区间最值因此从 $O(n^2)$ 降到 $O(n\\log n)$。",
+        "- 时间复杂度：单次更新 / 查询 $O(\\log n)$，整体 $O(n\\log n)$。\n- 空间复杂度：$O(n)$，动态开点线段树 $O(q\\log n)$。",
+        "- 树状数组下标从 1 开始，写成 0 会死循环。\n- 区间更新忘了下传懒标记，查询读到旧值。\n- 离散化后用错原值，应该用排名。",
+    )
+
+
+def string_matching_visual(pattern: str) -> dict[str, str]:
+    return base_visual(
+        pattern,
+        f"""flowchart LR
+  T[文本 / 模式串] --> P[预处理: next / z / hash]
+  P --> S[扫描时复用已匹配信息]
+  S --> C{{"{pattern}: 失配如何回退?"}}
+  C -->|有 border| J[跳到最长 border]
+  C -->|无| M[整体右移一位]
+  J --> S
+  M --> S""",
+        "- 看到“子串出现、最长回文、循环节、重复子串”，先想能不能用前缀函数 / Z 函数 / 哈希避免 $O(nm)$ 暴力。\n- 核心是失配时复用已经匹配的前缀，不从头再来。",
+        "- `next / z`：每个位置的最长 border 或扩展长度。\n- `j`：模式串当前已匹配的长度。\n- `hash`：子串签名，支持 $O(1)$ 比较。",
+        "1. 先 $O(n)$ 预处理 next（前缀函数）或 z 数组。\n2. 主串扫描失配就用 `j = next[j-1]` 回退，不动主串指针。\n3. 回文 / 循环节问题套用同一套 border 性质。\n4. 任意子串比较改用滚动哈希，注意双哈希防碰撞。",
+        "前缀函数让每个主串字符最多被比较常数次，匹配从 $O(nm)$ 降到 $O(n+m)$；哈希则把任意子串比较降到均摊 $O(1)$。",
+        "- 时间复杂度：KMP / Z $O(n+m)$；哈希预处理 $O(n)$、单次比较 $O(1)$。\n- 空间复杂度：$O(n)$。",
+        "- next 回退写成 `j = next[j]` 而不是 `next[j-1]`，错位。\n- 单哈希被构造数据卡碰撞，应双模数。\n- 回文中心扩展忘了奇偶两种中心。",
+    )
+
+
+def advanced_dp_visual(pattern: str) -> dict[str, str]:
+    return base_visual(
+        pattern,
+        f"""flowchart LR
+  S["定义高维状态: 位 / 子集 / 区间"] --> M[记忆化或按维度枚举]
+  M --> T["转移: {pattern}"]
+  T --> C{{到达边界 / 全集?}}
+  C -->|否| M
+  C -->|是| A[收集答案]""",
+        "- 普通线性 DP 不够用时，状态往往要升维：数位题按“第几位 + 是否贴上界”，集合题按 bitmask，区间题按 `[l, r]`。\n- 先确定状态每一维的含义，再写转移。",
+        "- `state`：高维状态，如 `(pos, tight, mask)` 或 `(l, r)`。\n- `memo`：记忆化表，避免重复子问题。\n- `transition`：枚举这一维的所有取值。",
+        "1. 写清楚状态每一维代表什么、取值范围多大。\n2. 数位 DP 用 `dfs(pos, tight, ...)` + 记忆化非贴边状态。\n3. 状压 DP 用枚举子集 `sub = (sub-1) & mask`。\n4. 区间 DP 按长度从小到大枚举 `[l, r]` 和断点 `k`。",
+        "升维 DP 的正确性仍来自“无后效性”：高维状态把影响未来的全部信息都编码进去，于是子问题互不干扰。",
+        "- 时间复杂度：数位 $O(\\text{位数}\\times\\text{状态})$；状压 $O(2^n n)$ 或枚举子集 $O(3^n)$；区间 $O(n^3)$。\n- 空间复杂度：状态总数。",
+        "- 数位 DP 把 `tight=true` 的状态也缓存，污染其他上界。\n- 状压枚举子集写成 `for s in 0..mask` 而非真子集枚举。\n- 区间 DP 枚举顺序错，用了还没算的更长区间。",
     )
 
 
@@ -1039,6 +1167,178 @@ impl AlgoStore {
         self.pos.insert(x, self.data.len());
         self.data.push(x);
     }
+}""",
+        )
+    if cat.slug == "range-query":
+        return (
+            """// 树状数组：单点加 + 前缀和查询；区间和 = Query(r) - Query(l-1)
+type BIT struct{ tree []int }
+
+func NewBIT(n int) *BIT { return &BIT{tree: make([]int, n+1)} }
+
+func (b *BIT) Update(i, delta int) {
+\tfor ; i < len(b.tree); i += i & -i {
+\t\tb.tree[i] += delta
+\t}
+}
+
+func (b *BIT) Query(i int) int {
+\tsum := 0
+\tfor ; i > 0; i -= i & -i {
+\t\tsum += b.tree[i]
+\t}
+\treturn sum
+}""",
+            """// 树状数组：单点加 + 前缀和查询
+pub struct Bit {
+    tree: Vec<i64>,
+}
+
+impl Bit {
+    pub fn new(n: usize) -> Self {
+        Self { tree: vec![0; n + 1] }
+    }
+
+    pub fn update(&mut self, mut i: usize, delta: i64) {
+        while i < self.tree.len() {
+            self.tree[i] += delta;
+            i += i & i.wrapping_neg();
+        }
+    }
+
+    pub fn query(&self, mut i: usize) -> i64 {
+        let mut sum = 0;
+        while i > 0 {
+            sum += self.tree[i];
+            i -= i & i.wrapping_neg();
+        }
+        sum
+    }
+}""",
+        )
+    if cat.slug == "string-matching":
+        return (
+            """// KMP：前缀函数 + 匹配，返回 pat 在 text 中首次出现下标，没有则 -1
+func kmpSearch(text, pat string) int {
+\tnext := make([]int, len(pat))
+\tfor i, j := 1, 0; i < len(pat); i++ {
+\t\tfor j > 0 && pat[i] != pat[j] {
+\t\t\tj = next[j-1]
+\t\t}
+\t\tif pat[i] == pat[j] {
+\t\t\tj++
+\t\t}
+\t\tnext[i] = j
+\t}
+\tfor i, j := 0, 0; i < len(text); i++ {
+\t\tfor j > 0 && text[i] != pat[j] {
+\t\t\tj = next[j-1]
+\t\t}
+\t\tif text[i] == pat[j] {
+\t\t\tj++
+\t\t}
+\t\tif j == len(pat) {
+\t\t\treturn i - j + 1
+\t\t}
+\t}
+\treturn -1
+}""",
+            """// KMP：前缀函数 + 匹配，返回首次出现下标，没有则 -1
+pub fn kmp_search(text: &[u8], pat: &[u8]) -> i32 {
+    if pat.is_empty() {
+        return 0;
+    }
+    let mut next = vec![0usize; pat.len()];
+    let mut j = 0;
+    for i in 1..pat.len() {
+        while j > 0 && pat[i] != pat[j] {
+            j = next[j - 1];
+        }
+        if pat[i] == pat[j] {
+            j += 1;
+        }
+        next[i] = j;
+    }
+    j = 0;
+    for (i, &c) in text.iter().enumerate() {
+        while j > 0 && c != pat[j] {
+            j = next[j - 1];
+        }
+        if c == pat[j] {
+            j += 1;
+        }
+        if j == pat.len() {
+            return (i - j + 1) as i32;
+        }
+    }
+    -1
+}""",
+        )
+    if cat.slug == "advanced-dp":
+        return (
+            """// 数位 DP 骨架：统计 [0, n] 中满足条件的数，state 按题意扩展
+func digitCount(n int) int {
+\tdigits := []int{}
+\tfor n > 0 {
+\t\tdigits = append([]int{n % 10}, digits...)
+\t\tn /= 10
+\t}
+\tmemo := map[[2]int]int{}
+\tvar dfs func(pos, state int, tight bool) int
+\tdfs = func(pos, state int, tight bool) int {
+\t\tif pos == len(digits) {
+\t\t\treturn 1
+\t\t}
+\t\tif !tight {
+\t\t\tif v, ok := memo[[2]int{pos, state}]; ok {
+\t\t\t\treturn v
+\t\t\t}
+\t\t}
+\t\tlimit := 9
+\t\tif tight {
+\t\t\tlimit = digits[pos]
+\t\t}
+\t\tres := 0
+\t\tfor d := 0; d <= limit; d++ {
+\t\t\tres += dfs(pos+1, state, tight && d == limit)
+\t\t}
+\t\tif !tight {
+\t\t\tmemo[[2]int{pos, state}] = res
+\t\t}
+\t\treturn res
+\t}
+\treturn dfs(0, 0, true)
+}""",
+            """// 数位 DP 骨架：统计 [0, n] 中满足条件的数
+pub fn digit_count(n: i32) -> i32 {
+    let digits: Vec<i32> = n.to_string().bytes().map(|b| (b - b'0') as i32).collect();
+    let mut memo = std::collections::HashMap::new();
+    fn dfs(
+        pos: usize,
+        state: i32,
+        tight: bool,
+        digits: &[i32],
+        memo: &mut std::collections::HashMap<(usize, i32), i32>,
+    ) -> i32 {
+        if pos == digits.len() {
+            return 1;
+        }
+        if !tight {
+            if let Some(&v) = memo.get(&(pos, state)) {
+                return v;
+            }
+        }
+        let limit = if tight { digits[pos] } else { 9 };
+        let mut res = 0;
+        for d in 0..=limit {
+            res += dfs(pos + 1, state, tight && d == limit, digits, memo);
+        }
+        if !tight {
+            memo.insert((pos, state), res);
+        }
+        res
+    }
+    dfs(0, 0, true, &digits, &mut memo)
 }""",
         )
     return (

@@ -3,15 +3,47 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  /* 亮色为默认，.dark 覆盖为暗色。通道值为 "R G B"，配合 tailwind 的 rgb(var(--c-x) / <alpha>)。 */
+  :root {
+    --c-bg: 255 255 255;
+    --c-bg-soft: 241 245 249;
+    --c-bg-card: 255 255 255;
+    --c-bg-border: 226 232 240;
+    --c-accent: 59 91 219;
+    --c-accent-hover: 47 73 184;
+    --c-accent-muted: 199 210 254;
+    --c-easy: 22 163 74;
+    --c-medium: 217 119 6;
+    --c-hard: 220 38 38;
+    --c-ink: 30 37 48;
+    --c-ink-mute: 91 100 114;
+    --c-ink-dim: 148 160 176;
+    color-scheme: light;
+  }
+  .dark {
+    --c-bg: 11 13 18;
+    --c-bg-soft: 17 20 27;
+    --c-bg-card: 22 26 35;
+    --c-bg-border: 37 43 57;
+    --c-accent: 124 156 255;
+    --c-accent-hover: 148 174 255;
+    --c-accent-muted: 61 74 122;
+    --c-easy: 34 197 94;
+    --c-medium: 245 158 11;
+    --c-hard: 239 68 68;
+    --c-ink: 230 232 238;
+    --c-ink-mute: 160 166 179;
+    --c-ink-dim: 107 114 128;
     color-scheme: dark;
+  }
+  html {
     scrollbar-gutter: stable;
   }
   body {
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
   ::selection {
-    background: rgba(124, 156, 255, 0.32);
+    background: rgb(var(--c-accent) / 0.32);
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -21,11 +53,11 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: #252b39;
+    background: rgb(var(--c-bg-border));
     border-radius: 6px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #3d4a7a;
+    background: rgb(var(--c-accent-muted));
   }
 }
 
@@ -67,9 +99,9 @@
     @apply inline-flex items-center rounded border border-bg-border bg-bg-soft px-1.5 py-0.5 font-mono text-[11px] text-ink-mute;
   }
 
-  /* prose 暗色微调 */
+  /* prose：亮色为常规、暗色反色，随主题切换 */
   .prose-dark {
-    @apply prose prose-invert max-w-none
+    @apply prose dark:prose-invert max-w-none
       prose-headings:font-semibold prose-headings:tracking-tight
       prose-h1:text-3xl prose-h2:text-2xl prose-h3:text-xl
       prose-h2:mt-10 prose-h2:border-b prose-h2:border-bg-border prose-h2:pb-2

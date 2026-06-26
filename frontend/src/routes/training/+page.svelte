@@ -11,8 +11,15 @@
     SquarePen,
     Target
   } from 'lucide-svelte';
-  import type { ArticleListItem, Difficulty } from '$lib/api';
+  import {
+    api,
+    type ArticleListItem,
+    type Difficulty,
+    type ApiTrainingRecord,
+    type TrainingInput
+  } from '$lib/api';
   import DifficultyChip from '$lib/components/DifficultyChip.svelte';
+  import { Download, Upload } from 'lucide-svelte';
 
   export let data;
   $: articles = data.articles as ArticleListItem[];
@@ -76,8 +83,15 @@
     {
       name: '第四阶段',
       title: '高级结构与综合题',
-      categories: ['并查集', '设计与数据结构', '数学与位运算'],
-      focus: '把数据结构当成约束工具，处理连通性、缓存、计数、位状态和系统化设计。',
+      categories: [
+        '并查集',
+        '设计与数据结构',
+        '数学与位运算',
+        '区间查询',
+        '字符串匹配',
+        '进阶动态规划'
+      ],
+      focus: '把数据结构当成约束工具：连通性、缓存、计数、位状态，以及树状数组/线段树、字符串匹配、升维 DP 等进阶专题。',
       checkpoints: ['能选择合适结构', '能分析操作复杂度', '能复盘同题多解差异']
     }
   ];
@@ -92,10 +106,81 @@
   let recordsByKey: Record<string, TrainingRecord> = {};
   let filter: StatusFilter = 'all';
   let activeSlug = '';
+  let syncNote = '';
 
-  onMount(() => {
-    recordsByKey = loadRecords();
+  onMount(async () => {
+    recordsByKey = await loadRecordsFromBackendOrLocal();
   });
+
+  // ---- 前端 camelCase ↔ 后端 snake_case 映射 ----
+  function fromApi(r: ApiTrainingRecord): TrainingRecord {
+    return {
+      articleKey: keyFor(r.article_slug),
+      articleSlug: r.article_slug,
+      status: (r.status || 'todo') as ArticleStatus,
+      patternNote: r.pattern_note,
+      completedProblems: r.completed_problems ?? [],
+      attemptResult: (r.attempt_result || '') as AttemptResult,
+      stuckNote: r.stuck_note,
+      reviewNote: r.review_note,
+      updatedAt: r.updated_at
+    };
+  }
+
+  function toApi(slug: string, r: TrainingRecord): TrainingInput {
+    return {
+      status: r.status ?? deriveStatus(r),
+      pattern_note: r.patternNote ?? '',
+      completed_problems: r.completedProblems ?? [],
+      attempt_result: r.attemptResult ?? '',
+      stuck_note: r.stuckNote ?? '',
+      review_note: r.reviewNote ?? ''
+    };
+  }
+
+  const emptyInput: TrainingInput = {
+    status: 'todo',
+    pattern_note: '',
+    completed_problems: [],
+    attempt_result: '',
+    stuck_note: '',
+    review_note: ''
+  };
+
+  // 后端优先 + localStorage 离线兜底 + 首次一次性迁移。
+  async function loadRecordsFromBackendOrLocal(): Promise<Record<string, TrainingRecord>> {
+    const local = loadLocalRecords();
+    try {
+      const remote = await api.trainingRecords();
+      if (remote.length > 0) {
+        const map: Record<string, TrainingRecord> = {};
+        for (const r of remote) map[keyFor(r.article_slug)] = fromApi(r);
+        return map;
+      }
+      // 后端为空但本地有记录 → 一次性迁移到后端。
+      const localEntries = Object.values(local).filter((r) => r.articleSlug);
+      if (localEntries.length > 0) {
+        await Promise.all(
+          localEntries.map((r) =>
+            api.putTraining(r.articleSlug!, toApi(r.articleSlug!, r)).catch(() => null)
+          )
+        );
+        syncNote = `已把本地 ${localEntries.length} 条进度迁移到后端`;
+      }
+      return local;
+    } catch {
+      syncNote = '后端不可用，进度暂存在本浏览器';
+      return local;
+    }
+  }
+
+  const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  function queueBackendSave(slug: string, record: TrainingRecord) {
+    clearTimeout(saveTimers[slug]);
+    saveTimers[slug] = setTimeout(() => {
+      api.putTraining(slug, toApi(slug, record)).catch(() => {});
+    }, 700);
+  }
 
   $: plannedArticles = phases.flatMap((phase) => phaseArticles(phase));
   $: trainingItems = plannedArticles.map((article) => toTrainingItem(article));
@@ -185,6 +270,7 @@
       [keyFor(slug)]: nextRecord
     };
     persist();
+    queueBackendSave(slug, nextRecord);
   }
 
   function setProblemDone(slug: string, id: number, done: boolean) {
@@ -194,9 +280,14 @@
   }
 
   function resetAll() {
+    const slugs = Object.values(recordsByKey)
+      .map((r) => r.articleSlug)
+      .filter((s): s is string => !!s);
     recordsByKey = {};
     activeSlug = '';
     persist();
+    for (const slug of slugs) clearTimeout(saveTimers[slug]);
+    for (const slug of slugs) api.putTraining(slug, emptyInput).catch(() => {});
   }
 
   function resetArticle(slug: string) {
@@ -204,6 +295,8 @@
     delete next[keyFor(slug)];
     recordsByKey = next;
     persist();
+    clearTimeout(saveTimers[slug]);
+    api.putTraining(slug, emptyInput).catch(() => {});
   }
 
   function keyFor(slug: string) {
@@ -223,7 +316,7 @@
     };
   }
 
-  function loadRecords(): Record<string, TrainingRecord> {
+  function loadLocalRecords(): Record<string, TrainingRecord> {
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) return JSON.parse(raw);
@@ -247,6 +340,54 @@
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(storageKey, JSON.stringify(recordsByKey));
   }
+
+  // 专题完成度（按 category 聚合当前训练项，本地计算，无需额外请求）。
+  $: categoryProgress = (() => {
+    const map = new Map<
+      string,
+      { total: number; reviewed: number; practiced: number; learned: number }
+    >();
+    for (const item of trainingItems) {
+      const c = item.article.category;
+      const e = map.get(c) ?? { total: 0, reviewed: 0, practiced: 0, learned: 0 };
+      e.total += 1;
+      if (item.status === 'reviewed') e.reviewed += 1;
+      else if (item.status === 'practiced') e.practiced += 1;
+      else if (item.status === 'learned') e.learned += 1;
+      map.set(c, e);
+    }
+    return [...map.entries()].map(([category, v]) => ({ category, ...v }));
+  })();
+
+  async function exportProgress() {
+    try {
+      const dump = await api.exportProgress();
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `algo-station-progress-${(dump.exported_at ?? '').slice(0, 10) || 'export'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      syncNote = '导出失败，后端不可用';
+    }
+  }
+
+  async function importProgress(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const dump = JSON.parse(await file.text());
+      const r = await api.importProgress(dump);
+      recordsByKey = await loadRecordsFromBackendOrLocal();
+      syncNote = `已导入：训练 ${r.training} · 草稿 ${r.drafts} · 收藏 ${r.bookmarks}`;
+    } catch {
+      syncNote = '导入失败，请检查文件格式';
+    }
+  }
 </script>
 
 <div class="mx-auto max-w-6xl px-6 py-8">
@@ -258,7 +399,20 @@
     <h1 class="text-2xl font-bold text-ink">从题目到算法思维</h1>
     <p class="mt-1 max-w-3xl text-sm text-ink-mute">
       训练状态不再靠点一个按钮确认，而是由你的阅读总结、完成题目和复盘记录自动推导。
+      进度保存在后端，换浏览器也不丢。
     </p>
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <button class="btn-ghost text-xs" on:click={exportProgress}>
+        <Download size={13} /> 导出进度
+      </button>
+      <label class="btn-ghost cursor-pointer text-xs">
+        <Upload size={13} /> 导入进度
+        <input type="file" accept="application/json" class="hidden" on:change={importProgress} />
+      </label>
+      {#if syncNote}
+        <span class="text-xs text-ink-dim">{syncNote}</span>
+      {/if}
+    </div>
   </header>
 
   <section class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -477,6 +631,32 @@
     </div>
 
     <aside class="space-y-4">
+      <section class="card p-5">
+        <h2 class="flex items-center gap-2 text-lg font-semibold text-ink">
+          <ListChecks size={17} /> 专题完成度
+        </h2>
+        <div class="mt-4 space-y-3">
+          {#each categoryProgress as c}
+            <div>
+              <div class="mb-1 flex items-center justify-between text-xs">
+                <span class="truncate text-ink-mute">{c.category}</span>
+                <span class="shrink-0 tabular-nums text-ink-dim">{c.reviewed}/{c.total}</span>
+              </div>
+              <div class="flex h-2 overflow-hidden rounded-full bg-bg-soft">
+                <div class="bg-easy" style="width: {(c.reviewed / c.total) * 100}%"></div>
+                <div class="bg-accent" style="width: {(c.practiced / c.total) * 100}%"></div>
+                <div class="bg-medium" style="width: {(c.learned / c.total) * 100}%"></div>
+              </div>
+            </div>
+          {/each}
+        </div>
+        <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-ink-dim">
+          <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-easy"></span>已复盘</span>
+          <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-accent"></span>独立做</span>
+          <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-medium"></span>读懂</span>
+        </div>
+      </section>
+
       <section class="card p-5">
         <h2 class="flex items-center gap-2 text-lg font-semibold text-ink">
           <Flame size={17} /> 每日节奏

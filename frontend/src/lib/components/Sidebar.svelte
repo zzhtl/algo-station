@@ -1,13 +1,20 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import { page } from '$app/stores';
+  import { theme } from '$lib/stores/theme';
   import {
     Home,
     ListChecks,
     BookOpen,
     Tags,
     Route,
-    Sparkles
+    Sparkles,
+    Star,
+    Sun,
+    Moon
   } from 'lucide-svelte';
+
+  const dispatch = createEventDispatcher<{ navigate: void }>();
 
   type NavItem = { href: string; label: string; icon: typeof Home; exact?: boolean };
 
@@ -16,7 +23,8 @@
     { href: '/training', label: '训练路线', icon: Route },
     { href: '/problems', label: '题库浏览', icon: ListChecks },
     { href: '/articles', label: '原创题解', icon: BookOpen },
-    { href: '/tags', label: '算法分类', icon: Tags }
+    { href: '/tags', label: '算法分类', icon: Tags },
+    { href: '/bookmarks', label: '我的收藏', icon: Star }
   ];
 
   function isActive(href: string, exact?: boolean) {
@@ -47,6 +55,7 @@
         <li>
           <a
             href={item.href}
+            on:click={() => dispatch('navigate')}
             class="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition
               {Active
                 ? 'bg-accent/10 text-accent ring-1 ring-accent/20'
@@ -60,7 +69,17 @@
     </ul>
   </nav>
 
-  <div class="border-t border-bg-border px-4 py-3 text-[11px] text-ink-dim">
-    <div>本地题库索引 · 原创讲解与练习</div>
+  <div class="border-t border-bg-border px-3 py-3">
+    <button
+      on:click={theme.toggle}
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-ink-mute transition hover:bg-bg-card hover:text-ink"
+    >
+      {#if $theme === 'dark'}
+        <Sun size={16} /> <span>浅色模式</span>
+      {:else}
+        <Moon size={16} /> <span>深色模式</span>
+      {/if}
+    </button>
+    <div class="px-3 pt-2 text-[11px] text-ink-dim">本地题库索引 · 原创讲解与练习</div>
   </div>
 </aside>
