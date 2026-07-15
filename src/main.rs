@@ -1,14 +1,14 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use algo_station::{
-    articles_seed, db, default_database_url, problem_seed, routes, state::AppState,
-    static_assets,
+    articles_seed, curriculum::CurriculumCatalog, db, default_database_url, problem_seed, routes,
+    state::AppState, static_assets,
 };
 use anyhow::Result;
 use axum::Router;
 use sqlx::sqlite::SqlitePoolOptions;
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -63,20 +63,22 @@ async fn main() -> Result<()> {
         tracing::warn!(error = ?e, "article seeding failed (non-fatal)");
     }
 
+    let catalog = CurriculumCatalog::bundled()?;
+    catalog.validate()?;
+
     let state = AppState {
         pool,
         leetcode_repo,
+        catalog: Arc::new(catalog),
     };
-
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let imported = routes::course::migrate_legacy_progress(&state).await?;
+    if imported > 0 {
+        tracing::info!(imported, "已迁移旧版训练进度到渐进式课程");
+    }
 
     let app = Router::new()
         .nest("/api", routes::api_router())
         .fallback(static_assets::fallback)
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -85,7 +87,11 @@ async fn main() -> Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(8928);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let host: IpAddr = std::env::var("HOST")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(host, port);
     tracing::info!("backend listening on http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

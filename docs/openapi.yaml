@@ -1,0 +1,917 @@
+openapi: 3.1.0
+info:
+  title: Algo Station API
+  version: 1.0.0
+  description: >-
+    单用户、离线优先的课程、复习与本地判题 API。除静态文章/标签/统计外，
+    个人学习端点均返回 Cache-Control: no-store。错误采用 RFC 7807 并保留 error 兼容字段。
+servers:
+  - url: http://127.0.0.1:8928/api
+    description: 默认本机服务
+tags:
+  - name: System
+  - name: Learning
+  - name: Reviews
+  - name: Judge
+  - name: Library
+  - name: Backup
+paths:
+  /health:
+    get:
+      tags: [System]
+      operationId: health
+      responses:
+        '200':
+          description: 服务可用
+          content:
+            text/plain:
+              schema: { type: string, const: ok }
+  /dashboard:
+    get:
+      tags: [Learning]
+      operationId: getDashboard
+      responses:
+        '200':
+          description: 今日计划与路线摘要
+          headers:
+            x-request-id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /curriculum:
+    get:
+      tags: [Learning]
+      operationId: getCurriculum
+      responses:
+        '200':
+          description: 12 阶段课程及个人进度
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Curriculum' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /lessons/{slug}:
+    parameters:
+      - $ref: '#/components/parameters/LessonSlug'
+    get:
+      tags: [Learning]
+      operationId: getLesson
+      description: 前置课程是软约束；未完成前置时仍返回 200，并令 prerequisites_met=false。
+      responses:
+        '200':
+          description: 课程详情。小测不包含正确答案，提交后才返回解析。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LessonDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /lessons/{slug}/progress:
+    parameters:
+      - $ref: '#/components/parameters/LessonSlug'
+    patch:
+      tags: [Learning]
+      operationId: patchLessonProgress
+      description: 更新动画/笔记后，由服务端根据全部证据重新推导完成状态。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                animation_completed: { type: boolean }
+                note: { type: string }
+      responses:
+        '200':
+          description: 最新推导进度
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Progress' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /lessons/{slug}/quiz-attempts:
+    parameters:
+      - $ref: '#/components/parameters/LessonSlug'
+    post:
+      tags: [Learning]
+      operationId: createQuizAttempt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              additionalProperties: false
+              properties:
+                answers:
+                  type: array
+                  items: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: 分数、逐题解析与最新进度
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttempt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /daily-plan:
+    get:
+      tags: [Learning]
+      operationId: getDailyPlan
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: 指定日期计划，未配置时目标为 60 分钟
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DailyPlan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    put:
+      tags: [Learning]
+      operationId: setDailyPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_minutes]
+              additionalProperties: false
+              properties:
+                date: { type: [string, 'null'], format: date }
+                target_minutes: { type: integer, minimum: 10, maximum: 240 }
+      responses:
+        '200':
+          description: 更新后的计划
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DailyPlan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /reviews:
+    get:
+      tags: [Reviews]
+      operationId: listReviews
+      responses:
+        '200':
+          description: 到期项优先的全部复习计划
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReviewItem' }
+  /reviews/{slug}/attempts:
+    parameters:
+      - $ref: '#/components/parameters/LessonSlug'
+    post:
+      tags: [Reviews]
+      operationId: createReviewAttempt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              additionalProperties: false
+              properties:
+                rating: { $ref: '#/components/schemas/ReviewRating' }
+      responses:
+        '200':
+          description: 调整后的复习计划
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewItem' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /exercises:
+    get:
+      tags: [Judge]
+      operationId: listExercises
+      parameters:
+        - name: stage_id
+          in: query
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          schema: { $ref: '#/components/schemas/Difficulty' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [accepted, unstarted] }
+        - name: cursor
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        '200':
+          description: 精选练习游标页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExercisePage' }
+  /exercises/{slug}:
+    parameters:
+      - $ref: '#/components/parameters/ExerciseSlug'
+    get:
+      tags: [Judge]
+      operationId: getExercise
+      description: 只返回公开样例；隐藏样例输入和期望值永不下发。
+      responses:
+        '200':
+          description: 练习、四种 starter 和公开样例
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExerciseDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /exercises/{slug}/draft:
+    parameters:
+      - $ref: '#/components/parameters/ExerciseSlug'
+    get:
+      tags: [Judge]
+      operationId: getExerciseDraft
+      parameters:
+        - $ref: '#/components/parameters/Language'
+        - $ref: '#/components/parameters/Contract'
+      responses:
+        '200':
+          description: 草稿；不存在时返回 null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ExerciseDraft' }
+                  - { type: 'null' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Judge]
+      operationId: putExerciseDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language, contract, code]
+              additionalProperties: false
+              properties:
+                language: { $ref: '#/components/schemas/Language' }
+                contract: { $ref: '#/components/schemas/Contract' }
+                code: { type: string, maxLength: 65536 }
+      responses:
+        '200':
+          description: 保存后的草稿
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExerciseDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+  /submissions:
+    get:
+      tags: [Judge]
+      operationId: listSubmissions
+      parameters:
+        - name: cursor
+          in: query
+          description: 返回 id 小于该值的记录
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: exercise_slug
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 提交历史
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubmissionPage' }
+    post:
+      tags: [Judge]
+      operationId: createSubmission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [exercise_slug, language, contract, source_code]
+              additionalProperties: false
+              properties:
+                exercise_slug: { type: string }
+                language: { $ref: '#/components/schemas/Language' }
+                contract: { $ref: '#/components/schemas/Contract' }
+                source_code: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        '201':
+          description: 已进入持久队列
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429':
+          description: queued + running 已达到 20
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /submissions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Judge]
+      operationId: getSubmission
+      responses:
+        '200':
+          description: 提交与当前判题结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /judge/status:
+    get:
+      tags: [Judge]
+      operationId: getJudgeStatus
+      responses:
+        '200':
+          description: Worker 心跳与队列数量
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JudgeStatus' }
+  /progress/export:
+    get:
+      tags: [Backup]
+      operationId: exportProgress
+      responses:
+        '200':
+          description: v2 学习进度导出；包含旧版兼容字段
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProgressExport' }
+  /progress/import:
+    post:
+      tags: [Backup]
+      operationId: importProgress
+      description: 接受无 schema_version 的 v1 文件和 schema_version=2 文件。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProgressExport' }
+      responses:
+        '200':
+          description: 各类导入数量
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [training, drafts, bookmarks, lessons, exercise_drafts, reviews]
+                properties:
+                  training: { type: integer }
+                  drafts: { type: integer }
+                  bookmarks: { type: integer }
+                  lessons: { type: integer }
+                  exercise_drafts: { type: integer }
+                  reviews: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+  /articles:
+    get:
+      tags: [Library]
+      operationId: listArticles
+      responses:
+        '200':
+          description: 全部文章摘要
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ArticleSummary' }
+  /articles/{slug}:
+    get:
+      tags: [Library]
+      operationId: getArticle
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Markdown 文章
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/ArticleSummary' }
+                  - type: object
+                    required: [content]
+                    properties:
+                      content: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /problems:
+    get:
+      tags: [Library]
+      operationId: listProblems
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: has_article, in: query, schema: { type: boolean } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        '200':
+          description: 完整题库分页索引
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /problems/{id}:
+    get:
+      tags: [Library]
+      operationId: getProblem
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: 题目索引详情, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /problems/{id}/statement:
+    get:
+      tags: [Library]
+      operationId: getProblemStatement
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: lang, in: query, schema: { type: string, enum: [cn, en], default: cn } }
+      responses:
+        '200': { description: 题面 Markdown 与来源信息, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /problems/{id}/solutions:
+    get:
+      tags: [Library]
+      operationId: getProblemSolutions
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: lang, in: query, schema: { type: string } }
+      responses:
+        '200': { description: 本地参考解法, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tags:
+    get:
+      tags: [Library]
+      operationId: listTags
+      responses:
+        '200': { description: 标签及题目数量, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /stats:
+    get:
+      tags: [Library]
+      operationId: getStats
+      responses:
+        '200': { description: 题库与文章计数, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /stats/progress:
+    get:
+      tags: [Backup]
+      operationId: getLegacyProgressStats
+      deprecated: true
+      responses:
+        '200': { description: 旧版文章训练进度统计, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /progress/training:
+    get:
+      tags: [Backup]
+      operationId: listLegacyTrainingRecords
+      deprecated: true
+      responses:
+        '200': { description: 旧版文章训练记录, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /progress/training/{slug}:
+    put:
+      tags: [Backup]
+      operationId: putLegacyTrainingRecord
+      deprecated: true
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: 保存后的旧版记录, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /progress/drafts/{id}:
+    get:
+      tags: [Backup]
+      operationId: listLegacyProblemDrafts
+      deprecated: true
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: 旧版按题号草稿, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /progress/drafts/{id}/{lang}:
+    put:
+      tags: [Backup]
+      operationId: putLegacyProblemDraft
+      deprecated: true
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: lang, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } }
+      responses:
+        '200': { description: 保存后的旧版草稿, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /bookmarks:
+    get:
+      tags: [Library]
+      operationId: listBookmarks
+      responses:
+        '200': { description: 收藏题号, content: { application/json: { schema: { type: array, items: { type: integer } } } } }
+  /bookmarks/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    put:
+      tags: [Library]
+      operationId: addBookmark
+      responses:
+        '204': { description: 已收藏 }
+    delete:
+      tags: [Library]
+      operationId: removeBookmark
+      responses:
+        '204': { description: 已取消收藏 }
+components:
+  headers:
+    RequestId:
+      description: 服务端生成或透传的请求标识
+      schema: { type: string, format: uuid }
+  parameters:
+    LessonSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^stage-[0-9]{2}-lesson-[0-9]{2}$' }
+    ExerciseSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string }
+    Language:
+      name: language
+      in: query
+      required: true
+      schema: { $ref: '#/components/schemas/Language' }
+    Contract:
+      name: contract
+      in: query
+      required: true
+      schema: { $ref: '#/components/schemas/Contract' }
+  responses:
+    BadRequest:
+      description: 请求参数或状态不合法
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PayloadTooLarge:
+      description: 源码或草稿超过 64 KiB
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: 服务端内部错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Difficulty:
+      type: string
+      enum: [Easy, Medium, Hard]
+    Language:
+      type: string
+      enum: [go, rust]
+    Contract:
+      type: string
+      enum: [function, stdio]
+    LessonStatus:
+      type: string
+      enum: [not_started, in_progress, completed]
+    ReviewRating:
+      type: string
+      enum: [forgotten, fuzzy, remembered]
+    SubmissionStatus:
+      type: string
+      enum: [queued, running, accepted, wrong_answer, compile_error, runtime_error, time_limit, memory_limit, internal_error]
+    Problem:
+      type: object
+      required: [type, title, status, detail, error]
+      additionalProperties: true
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        error: { type: string, description: 旧客户端兼容字段，与 detail 相同 }
+    LessonCard:
+      type: object
+      required: [slug, stage_id, title, summary, order, estimated_minutes, status, prerequisites_met, has_visualization, exercise_count]
+      properties:
+        slug: { type: string }
+        stage_id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        order: { type: integer }
+        estimated_minutes: { type: integer }
+        status: { $ref: '#/components/schemas/LessonStatus' }
+        prerequisites_met: { type: boolean }
+        has_visualization: { type: boolean }
+        exercise_count: { type: integer }
+    Progress:
+      type: object
+      required: [lesson_slug, status, animation_completed, quiz_best_score, core_exercise_accepted, note, completed_at, updated_at]
+      properties:
+        lesson_slug: { type: string }
+        status: { $ref: '#/components/schemas/LessonStatus' }
+        animation_completed: { type: boolean }
+        quiz_best_score: { type: integer, minimum: 0, maximum: 100 }
+        core_exercise_accepted: { type: boolean }
+        note: { type: string }
+        completed_at: { type: [string, 'null'] }
+        updated_at: { type: [string, 'null'] }
+    DailyPlan:
+      type: object
+      required: [date, target_minutes, estimated_minutes, lessons]
+      properties:
+        date: { type: string, format: date }
+        target_minutes: { type: integer }
+        estimated_minutes: { type: integer }
+        lessons: { type: array, items: { $ref: '#/components/schemas/LessonCard' } }
+    Dashboard:
+      type: object
+      required: [completed_lessons, total_lessons, completion_percent, streak_days, due_reviews, next_lesson, daily_plan, judge_online]
+      properties:
+        completed_lessons: { type: integer }
+        total_lessons: { type: integer }
+        completion_percent: { type: integer, minimum: 0, maximum: 100 }
+        streak_days: { type: integer }
+        due_reviews: { type: integer }
+        next_lesson:
+          oneOf:
+            - { $ref: '#/components/schemas/LessonCard' }
+            - { type: 'null' }
+        daily_plan: { $ref: '#/components/schemas/DailyPlan' }
+        judge_online: { type: boolean }
+    Curriculum:
+      type: object
+      required: [summary, stages]
+      properties:
+        summary:
+          type: object
+          required: [stage_count, lesson_count, exercise_count, visualization_count, completed_lessons, completion_percent]
+          properties:
+            stage_count: { type: integer }
+            lesson_count: { type: integer }
+            exercise_count: { type: integer }
+            visualization_count: { type: integer }
+            completed_lessons: { type: integer }
+            completion_percent: { type: integer }
+        stages:
+          type: array
+          items:
+            type: object
+            required: [id, title, description, order, completed_lessons, lessons]
+            properties:
+              id: { type: string }
+              title: { type: string }
+              description: { type: string }
+              order: { type: integer }
+              completed_lessons: { type: integer }
+              lessons: { type: array, items: { $ref: '#/components/schemas/LessonCard' } }
+    LessonDetail:
+      type: object
+      required: [lesson, progress, prerequisites_met, visualization, exercises]
+      properties:
+        lesson:
+          type: object
+          required: [slug, stage_id, article_slug, title, summary, order, estimated_minutes, prerequisites, objectives, quiz]
+          properties:
+            slug: { type: string }
+            stage_id: { type: string }
+            article_slug: { type: string }
+            title: { type: string }
+            summary: { type: string }
+            order: { type: integer }
+            estimated_minutes: { type: integer }
+            prerequisites: { type: array, items: { type: string } }
+            objectives: { type: array, items: { type: string } }
+            quiz:
+              type: array
+              items:
+                type: object
+                required: [id, prompt, options]
+                properties:
+                  id: { type: string }
+                  prompt: { type: string }
+                  options: { type: array, items: { type: string } }
+        progress: { $ref: '#/components/schemas/Progress' }
+        prerequisites_met: { type: boolean }
+        visualization:
+          oneOf:
+            - type: object
+              required: [id, lesson_slug, title, kind, description]
+              properties:
+                id: { type: string }
+                lesson_slug: { type: string }
+                title: { type: string }
+                kind: { type: string }
+                description: { type: string }
+            - { type: 'null' }
+        exercises: { type: array, items: { $ref: '#/components/schemas/ExerciseSummary' } }
+    ExerciseSummary:
+      type: object
+      required: [slug, problem_id, title, difficulty, summary, core, accepted]
+      properties:
+        slug: { type: string }
+        problem_id: { type: integer }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        summary: { type: string }
+        core: { type: boolean }
+        accepted: { type: boolean }
+    QuizAttempt:
+      type: object
+      required: [score, passed, corrections, progress]
+      properties:
+        score: { type: integer }
+        passed: { type: boolean }
+        corrections:
+          type: array
+          items:
+            type: object
+            required: [question_id, selected_index, correct_index, correct, explanation]
+            properties:
+              question_id: { type: string }
+              selected_index: { type: integer }
+              correct_index: { type: integer }
+              correct: { type: boolean }
+              explanation: { type: string }
+        progress: { $ref: '#/components/schemas/Progress' }
+    ReviewItem:
+      type: object
+      required: [lesson_slug, title, step, due_at, last_rating, mastered, due]
+      properties:
+        lesson_slug: { type: string }
+        title: { type: string }
+        step: { type: integer, minimum: 0, maximum: 4 }
+        due_at: { type: string }
+        last_rating:
+          oneOf:
+            - { $ref: '#/components/schemas/ReviewRating' }
+            - { type: 'null' }
+        mastered: { type: boolean }
+        due: { type: boolean }
+    ExercisePage:
+      type: object
+      required: [items, next_cursor, total]
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/ExerciseSummary' }
+              - type: object
+                required: [lesson_slug, stage_id]
+                properties:
+                  lesson_slug: { type: string }
+                  stage_id: { type: string }
+        next_cursor: { type: [integer, 'null'] }
+        total: { type: integer }
+    Starter:
+      type: object
+      required: [language, contract, code]
+      properties:
+        language: { $ref: '#/components/schemas/Language' }
+        contract: { $ref: '#/components/schemas/Contract' }
+        code: { type: string }
+    ExerciseDetail:
+      type: object
+      required: [slug, problem_id, lesson_slug, title, difficulty, summary, starters, public_cases, hidden_case_count, limits, accepted]
+      properties:
+        slug: { type: string }
+        problem_id: { type: integer }
+        lesson_slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        summary: { type: string }
+        starters: { type: array, minItems: 4, items: { $ref: '#/components/schemas/Starter' } }
+        public_cases:
+          type: array
+          items:
+            type: object
+            required: [name, input, expected]
+            properties:
+              name: { type: string }
+              input: { type: string }
+              expected: { type: string }
+        hidden_case_count: { type: integer, minimum: 1 }
+        limits:
+          type: object
+          required: [compile_ms, case_ms, total_ms, memory_mb, output_kb]
+          properties:
+            compile_ms: { type: integer }
+            case_ms: { type: integer }
+            total_ms: { type: integer }
+            memory_mb: { type: integer }
+            output_kb: { type: integer }
+        accepted: { type: boolean }
+    ExerciseDraft:
+      type: object
+      required: [exercise_slug, language, contract, code, updated_at]
+      properties:
+        exercise_slug: { type: string }
+        language: { $ref: '#/components/schemas/Language' }
+        contract: { $ref: '#/components/schemas/Contract' }
+        code: { type: string }
+        updated_at: { type: string }
+    JudgeCase:
+      type: object
+      required: [name, visibility, status, duration_ms]
+      properties:
+        name: { type: string }
+        visibility: { type: string, enum: [public, hidden] }
+        status: { $ref: '#/components/schemas/SubmissionStatus' }
+        duration_ms: { type: integer }
+        actual: { type: string, description: 只对公开样例返回 }
+        message: { type: string }
+    JudgeResult:
+      type: object
+      required: [status, message, compile_output, cases, duration_ms]
+      properties:
+        status: { $ref: '#/components/schemas/SubmissionStatus' }
+        message: { type: string }
+        compile_output: { type: string }
+        cases: { type: array, items: { $ref: '#/components/schemas/JudgeCase' } }
+        duration_ms: { type: integer }
+    Submission:
+      type: object
+      required: [id, exercise_slug, lesson_slug, language, contract, source_code, status, attempts, result, queued_at, started_at, finished_at, updated_at]
+      properties:
+        id: { type: integer, format: int64 }
+        exercise_slug: { type: string }
+        lesson_slug: { type: string }
+        language: { $ref: '#/components/schemas/Language' }
+        contract: { $ref: '#/components/schemas/Contract' }
+        source_code: { type: string }
+        status: { $ref: '#/components/schemas/SubmissionStatus' }
+        attempts: { type: integer, minimum: 0, maximum: 3 }
+        result:
+          oneOf:
+            - { $ref: '#/components/schemas/JudgeResult' }
+            - { type: 'null' }
+        queued_at: { type: string }
+        started_at: { type: [string, 'null'] }
+        finished_at: { type: [string, 'null'] }
+        updated_at: { type: string }
+    SubmissionPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Submission' } }
+        next_cursor: { type: [integer, 'null'] }
+    JudgeStatus:
+      type: object
+      required: [online, queue_size, running, last_heartbeat_at]
+      properties:
+        online: { type: boolean }
+        queue_size: { type: integer }
+        running: { type: integer }
+        last_heartbeat_at: { type: [string, 'null'] }
+    ArticleSummary:
+      type: object
+      required: [slug, title, category, difficulty, summary, problem_ids, order_in_cat]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        category: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        summary: { type: string }
+        problem_ids: { type: array, items: { type: integer } }
+        order_in_cat: { type: integer }
+    ProgressExport:
+      type: object
+      description: v1 文件可省略 schema_version 与后三个数组。
+      properties:
+        schema_version: { type: integer, enum: [1, 2], default: 1 }
+        training: { type: array, items: { type: object, additionalProperties: true }, default: [] }
+        drafts: { type: array, items: { type: object, additionalProperties: true }, default: [] }
+        bookmarks: { type: array, items: { type: integer }, default: [] }
+        lessons: { type: array, items: { type: object, additionalProperties: true }, default: [] }
+        exercise_drafts: { type: array, items: { $ref: '#/components/schemas/ExerciseDraft' }, default: [] }
+        reviews: { type: array, items: { type: object, additionalProperties: true }, default: [] }
+        exported_at: { type: string }

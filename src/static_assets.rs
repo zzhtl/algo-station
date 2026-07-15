@@ -45,7 +45,32 @@ fn serve(path: &str) -> Option<Response> {
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, mime.as_ref())
+            .header(header::CACHE_CONTROL, cache_control(path))
             .body(Body::from(file.data.into_owned()))
             .unwrap(),
     )
+}
+
+fn cache_control(path: &str) -> &'static str {
+    if path.starts_with("_app/immutable/") {
+        "public, max-age=31536000, immutable"
+    } else if path == "index.html" {
+        "no-cache"
+    } else {
+        "public, max-age=3600"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache_control;
+
+    #[test]
+    fn immutable_assets_and_spa_shell_use_different_cache_policies() {
+        assert_eq!(
+            cache_control("_app/immutable/chunks/app.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(cache_control("index.html"), "no-cache");
+    }
 }

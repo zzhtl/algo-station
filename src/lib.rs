@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 pub mod articles_seed;
+pub mod curriculum;
 pub mod db;
 pub mod error;
+pub mod judge;
+pub mod learning;
 pub mod models;
 pub mod problem_seed;
 pub mod routes;

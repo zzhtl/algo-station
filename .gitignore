@@ -2,6 +2,7 @@ target/
 node_modules/
 .svelte-kit/
 build/
+__pycache__/
 .env
 data/*.db
 data/*.db-journal

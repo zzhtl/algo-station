@@ -4,12 +4,11 @@
   import { theme } from '$lib/stores/theme';
   import {
     Home,
-    ListChecks,
+    Brain,
     BookOpen,
-    Tags,
+    Code2,
     Route,
     Sparkles,
-    Star,
     Sun,
     Moon
   } from 'lucide-svelte';
@@ -19,12 +18,11 @@
   type NavItem = { href: string; label: string; icon: typeof Home; exact?: boolean };
 
   const nav: NavItem[] = [
-    { href: '/', label: '首页', icon: Home, exact: true },
-    { href: '/training', label: '训练路线', icon: Route },
-    { href: '/problems', label: '题库浏览', icon: ListChecks },
-    { href: '/articles', label: '原创题解', icon: BookOpen },
-    { href: '/tags', label: '算法分类', icon: Tags },
-    { href: '/bookmarks', label: '我的收藏', icon: Star }
+    { href: '/', label: '今日学习', icon: Home, exact: true },
+    { href: '/roadmap', label: '学习路线', icon: Route },
+    { href: '/practice', label: '配套训练', icon: Code2 },
+    { href: '/reviews', label: '间隔复习', icon: Brain },
+    { href: '/library', label: '算法资料库', icon: BookOpen }
   ];
 
   function isActive(href: string, exact?: boolean) {
@@ -41,13 +39,13 @@
     </div>
     <div class="leading-tight">
       <div class="font-semibold tracking-tight text-ink">Algo Station</div>
-      <div class="text-[11px] text-ink-dim">算法学习站 · 原创题解</div>
+      <div class="text-[11px] text-ink-dim">理解 · 训练 · 复习</div>
     </div>
   </div>
 
   <nav class="flex-1 overflow-y-auto px-2 py-3">
     <div class="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
-      浏览
+      学习
     </div>
     <ul class="space-y-0.5">
       {#each nav as item}
@@ -80,6 +78,10 @@
         <Moon size={16} /> <span>深色模式</span>
       {/if}
     </button>
-    <div class="px-3 pt-2 text-[11px] text-ink-dim">本地题库索引 · 原创讲解与练习</div>
+    <div class="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-2 text-[11px] text-ink-dim">
+      <a href="/problems" class="hover:text-accent">完整题库</a>
+      <a href="/articles" class="hover:text-accent">全部文章</a>
+      <a href="/bookmarks" class="hover:text-accent">收藏</a>
+    </div>
   </div>
 </aside>

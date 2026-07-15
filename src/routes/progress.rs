@@ -4,6 +4,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ApiResult;
@@ -224,6 +225,8 @@ pub async fn remove_bookmark(
 
 #[derive(Serialize, Deserialize)]
 pub struct ProgressExport {
+    #[serde(default = "legacy_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub training: Vec<TrainingExportRecord>,
     #[serde(default)]
@@ -231,7 +234,17 @@ pub struct ProgressExport {
     #[serde(default)]
     pub bookmarks: Vec<i64>,
     #[serde(default)]
+    pub lessons: Vec<LessonProgressExport>,
+    #[serde(default)]
+    pub exercise_drafts: Vec<ExerciseDraftExport>,
+    #[serde(default)]
+    pub reviews: Vec<ReviewScheduleExport>,
+    #[serde(default)]
     pub exported_at: String,
+}
+
+fn legacy_schema_version() -> u32 {
+    1
 }
 
 /// 导出/导入用，可反序列化（TrainingRecord 仅 Serialize）。
@@ -260,11 +273,128 @@ pub struct DraftExport {
     pub code: String,
 }
 
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct LessonProgressExport {
+    pub lesson_slug: String,
+    pub status: String,
+    pub animation_completed: bool,
+    pub quiz_best_score: i64,
+    #[serde(default)]
+    pub note: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct ExerciseDraftExport {
+    pub exercise_slug: String,
+    pub language: String,
+    pub contract: String,
+    #[serde(default)]
+    pub code: String,
+}
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct ReviewScheduleExport {
+    pub lesson_slug: String,
+    pub step: i64,
+    pub due_at: String,
+    pub last_rating: Option<String>,
+    pub mastered: bool,
+}
+
 #[derive(Serialize)]
 pub struct ImportResult {
     pub training: usize,
     pub drafts: usize,
     pub bookmarks: usize,
+    pub lessons: usize,
+    pub exercise_drafts: usize,
+    pub reviews: usize,
+}
+
+fn valid_sqlite_datetime(value: &str) -> bool {
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S").is_ok()
+}
+
+fn validate_import(state: &AppState, data: &ProgressExport) -> ApiResult<()> {
+    if !matches!(data.schema_version, 1 | 2) {
+        return Err(crate::error::ApiError::BadRequest(format!(
+            "unsupported progress schema_version {}",
+            data.schema_version
+        )));
+    }
+    if data.drafts.iter().any(|draft| draft.code.len() > 64 * 1024)
+        || data
+            .exercise_drafts
+            .iter()
+            .any(|draft| draft.code.len() > 64 * 1024)
+    {
+        return Err(crate::error::ApiError::PayloadTooLarge(
+            "draft code exceeds 65536 bytes".to_owned(),
+        ));
+    }
+    for lesson in &data.lessons {
+        let known_lesson = state
+            .catalog
+            .lessons
+            .iter()
+            .any(|item| item.slug == lesson.lesson_slug);
+        let valid_completed_at = lesson
+            .completed_at
+            .as_deref()
+            .is_none_or(valid_sqlite_datetime);
+        if !known_lesson
+            || !matches!(
+                lesson.status.as_str(),
+                "not_started" | "in_progress" | "completed"
+            )
+            || !(0..=100).contains(&lesson.quiz_best_score)
+            || !valid_completed_at
+        {
+            return Err(crate::error::ApiError::BadRequest(format!(
+                "invalid lesson progress for {}",
+                lesson.lesson_slug
+            )));
+        }
+    }
+    for draft in &data.exercise_drafts {
+        let exercise = state
+            .catalog
+            .exercises
+            .iter()
+            .find(|item| item.slug == draft.exercise_slug)
+            .ok_or_else(|| {
+                crate::error::ApiError::BadRequest(format!(
+                    "unknown exercise_slug {}",
+                    draft.exercise_slug
+                ))
+            })?;
+        if !exercise.has_template(&draft.language, &draft.contract) {
+            return Err(crate::error::ApiError::BadRequest(format!(
+                "unsupported draft target {}/{}",
+                draft.language, draft.contract
+            )));
+        }
+    }
+    for review in &data.reviews {
+        if !state
+            .catalog
+            .lessons
+            .iter()
+            .any(|item| item.slug == review.lesson_slug)
+            || !(0..=4).contains(&review.step)
+            || !valid_sqlite_datetime(&review.due_at)
+            || review.last_rating.as_ref().is_some_and(|rating| {
+                !matches!(rating.as_str(), "forgotten" | "fuzzy" | "remembered")
+            })
+        {
+            return Err(crate::error::ApiError::BadRequest(format!(
+                "invalid review schedule for {}",
+                review.lesson_slug
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub async fn export_all(State(state): State<AppState>) -> ApiResult<Json<ProgressExport>> {
@@ -304,14 +434,37 @@ pub async fn export_all(State(state): State<AppState>) -> ApiResult<Json<Progres
             .fetch_all(&state.pool)
             .await?;
 
+    let lessons = sqlx::query_as::<_, LessonProgressExport>(
+        "SELECT lesson_slug, status, animation_completed, quiz_best_score, note, completed_at
+         FROM lesson_progress ORDER BY lesson_slug",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let exercise_drafts = sqlx::query_as::<_, ExerciseDraftExport>(
+        "SELECT exercise_slug, language, contract, code
+         FROM exercise_drafts ORDER BY exercise_slug, language, contract",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let reviews = sqlx::query_as::<_, ReviewScheduleExport>(
+        "SELECT lesson_slug, step, due_at, last_rating, mastered
+         FROM review_schedules ORDER BY lesson_slug",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
     let exported_at: String = sqlx::query_scalar("SELECT datetime('now')")
         .fetch_one(&state.pool)
         .await?;
 
     Ok(Json(ProgressExport {
+        schema_version: 2,
         training,
         drafts,
         bookmarks,
+        lessons,
+        exercise_drafts,
+        reviews,
         exported_at,
     }))
 }
@@ -320,32 +473,119 @@ pub async fn import_all(
     State(state): State<AppState>,
     Json(data): Json<ProgressExport>,
 ) -> ApiResult<Json<ImportResult>> {
+    validate_import(&state, &data)?;
     let result = ImportResult {
         training: data.training.len(),
         drafts: data.drafts.len(),
         bookmarks: data.bookmarks.len(),
+        lessons: data.lessons.len(),
+        exercise_drafts: data.exercise_drafts.len(),
+        reviews: data.reviews.len(),
     };
+    let mut transaction = state.pool.begin().await?;
 
     for r in &data.training {
-        let input = TrainingInput {
-            status: r.status.clone(),
-            pattern_note: r.pattern_note.clone(),
-            completed_problems: r.completed_problems.clone(),
-            attempt_result: r.attempt_result.clone(),
-            stuck_note: r.stuck_note.clone(),
-            review_note: r.review_note.clone(),
-        };
-        upsert_training(&state.pool, &r.article_slug, &input).await?;
+        let completed = serde_json::to_string(&r.completed_problems)
+            .unwrap_or_else(|_| "[]".to_owned());
+        sqlx::query(
+            "INSERT INTO training_records
+                (article_slug, status, pattern_note, completed_problems, attempt_result, stuck_note, review_note, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(article_slug) DO UPDATE SET
+                status=excluded.status,
+                pattern_note=excluded.pattern_note,
+                completed_problems=excluded.completed_problems,
+                attempt_result=excluded.attempt_result,
+                stuck_note=excluded.stuck_note,
+                review_note=excluded.review_note,
+                updated_at=excluded.updated_at",
+        )
+        .bind(&r.article_slug)
+        .bind(&r.status)
+        .bind(&r.pattern_note)
+        .bind(completed)
+        .bind(&r.attempt_result)
+        .bind(&r.stuck_note)
+        .bind(&r.review_note)
+        .execute(&mut *transaction)
+        .await?;
     }
     for d in &data.drafts {
-        upsert_draft(&state.pool, d.problem_id, &d.lang, &d.code).await?;
+        sqlx::query(
+            "INSERT INTO practice_drafts (problem_id, lang, code, updated_at)
+             VALUES (?, ?, ?, datetime('now'))
+             ON CONFLICT(problem_id, lang) DO UPDATE SET code=excluded.code, updated_at=excluded.updated_at",
+        )
+        .bind(d.problem_id)
+        .bind(&d.lang)
+        .bind(&d.code)
+        .execute(&mut *transaction)
+        .await?;
     }
     for b in &data.bookmarks {
         sqlx::query("INSERT OR IGNORE INTO bookmarks (problem_id) VALUES (?)")
             .bind(b)
-            .execute(&state.pool)
+            .execute(&mut *transaction)
             .await?;
     }
+    for lesson in &data.lessons {
+        sqlx::query(
+            "INSERT INTO lesson_progress
+             (lesson_slug, status, animation_completed, quiz_best_score, note, completed_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(lesson_slug) DO UPDATE SET
+                 status=excluded.status,
+                 animation_completed=excluded.animation_completed,
+                 quiz_best_score=excluded.quiz_best_score,
+                 note=excluded.note,
+                 completed_at=excluded.completed_at,
+                 updated_at=excluded.updated_at",
+        )
+        .bind(&lesson.lesson_slug)
+        .bind(&lesson.status)
+        .bind(i64::from(lesson.animation_completed))
+        .bind(lesson.quiz_best_score)
+        .bind(&lesson.note)
+        .bind(&lesson.completed_at)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    for draft in &data.exercise_drafts {
+        sqlx::query(
+            "INSERT INTO exercise_drafts
+             (exercise_slug, language, contract, code, updated_at)
+             VALUES (?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(exercise_slug, language, contract) DO UPDATE SET
+                 code=excluded.code, updated_at=excluded.updated_at",
+        )
+        .bind(&draft.exercise_slug)
+        .bind(&draft.language)
+        .bind(&draft.contract)
+        .bind(&draft.code)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    for review in &data.reviews {
+        sqlx::query(
+            "INSERT INTO review_schedules
+             (lesson_slug, step, due_at, last_rating, mastered, updated_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(lesson_slug) DO UPDATE SET
+                 step=excluded.step,
+                 due_at=excluded.due_at,
+                 last_rating=excluded.last_rating,
+                 mastered=excluded.mastered,
+                 updated_at=excluded.updated_at",
+        )
+        .bind(&review.lesson_slug)
+        .bind(review.step)
+        .bind(&review.due_at)
+        .bind(&review.last_rating)
+        .bind(i64::from(review.mastered))
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
 
     Ok(Json(result))
 }

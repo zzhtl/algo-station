@@ -1,9 +1,6 @@
-import { api } from '$lib/api';
+import { redirect } from '@sveltejs/kit';
 
-export const load = async ({ fetch }) => {
-  const [stats, articles] = await Promise.all([
-    api.stats(fetch).catch(() => null),
-    api.articles(fetch).catch(() => [])
-  ]);
-  return { stats, articles };
+export const load = () => {
+  redirect(307, '/roadmap');
 };
+
